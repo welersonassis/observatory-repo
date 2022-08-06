@@ -14,14 +14,14 @@ class Candidates(models.Model):
 
 
 class RawTweets(models.Model):
-    tweet_id = models.IntegerField(primary_key=True)
-    date = models.DateField()
+    tweet_id = models.AutoField(primary_key=True)
+    date = models.DateTimeField()
     tweet_text = models.TextField()
     word_count = models.IntegerField()
     hashtags = models.CharField(max_length=255)
     retweets = models.IntegerField()
     likes = models.IntegerField()
-    candidate_id = models.ForeignKey(Candidates, on_delete=models.CASCADE)
+    candidate = models.ForeignKey(Candidates, on_delete=models.CASCADE)
 
     class Meta:
         db_table = 'raw_tweets'
@@ -29,7 +29,7 @@ class RawTweets(models.Model):
 
 
 class AggregateTweets(models.Model):
-    collect_id = models.IntegerField(primary_key=True)
+    collect_id = models.AutoField(primary_key=True)
     date = models.DateField()
     followers_count = models.IntegerField()
     tweets_count = models.IntegerField()
@@ -37,7 +37,7 @@ class AggregateTweets(models.Model):
     hashtags = models.CharField(max_length=255)
     retweets = models.IntegerField()
     likes = models.IntegerField()
-    candidate_id = models.ForeignKey(Candidates, on_delete=models.CASCADE)
+    candidate = models.ForeignKey(Candidates, on_delete=models.CASCADE)
 
     class Meta:
         db_table = 'aggregate_tweets'
@@ -45,14 +45,14 @@ class AggregateTweets(models.Model):
 
 
 class InstaRaw(models.Model):
-    post_id = models.IntegerField(primary_key=True)
-    date = models.DateField()
+    post_id = models.AutoField(primary_key=True)
+    date = models.DateTimeField()
     post_text = models.TextField()
     word_count = models.IntegerField()
     hashtags = models.CharField(max_length=255)
     comments_count = models.IntegerField()
     likes = models.IntegerField()
-    candidate_id = models.ForeignKey(Candidates, on_delete=models.CASCADE)
+    candidate = models.ForeignKey(Candidates, on_delete=models.CASCADE)
 
     class Meta:
         db_table = 'insta_raw'
@@ -60,7 +60,7 @@ class InstaRaw(models.Model):
 
 
 class InstaAggregate(models.Model):
-    collect_id = models.IntegerField(primary_key=True)
+    collect_id = models.AutoField(primary_key=True)
     date = models.DateField()
     followers_count = models.IntegerField()
     posts_count = models.IntegerField()
@@ -68,7 +68,7 @@ class InstaAggregate(models.Model):
     hashtags = models.CharField(max_length=255)
     comments_count = models.IntegerField()
     likes = models.IntegerField()
-    candidate_id = models.ForeignKey(Candidates, on_delete=models.CASCADE)
+    candidate = models.ForeignKey(Candidates, on_delete=models.CASCADE)
 
     class Meta:
         db_table = 'insta_aggregate'
