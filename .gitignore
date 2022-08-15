@@ -3,3 +3,6 @@ __pycache__/
 migrations/
 venv/
 .env
+manage.spec
+dist
+build

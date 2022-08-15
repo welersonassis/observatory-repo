@@ -85,3 +85,16 @@ class HashtagSerializer(serializers.Serializer):
 class TopicsSerializer(serializers.Serializer):
   name = serializers.CharField()
   topics = serializers.DictField(child = serializers.IntegerField())
+
+class RankingSerializer(serializers.Serializer):
+  saude = serializers.DictField(child = serializers.IntegerField())
+  seguranca = serializers.DictField(child = serializers.IntegerField())
+  saneamento = serializers.DictField(child = serializers.IntegerField())
+  educacao = serializers.DictField(child = serializers.IntegerField())
+
+class SpaceSerializer(serializers.Serializer):
+  candidate = serializers.CharField()
+  saude = serializers.DecimalField(max_digits=5, decimal_places=3)
+  seguranca = serializers.DecimalField(max_digits=5, decimal_places=3)
+  saneamento = serializers.DecimalField(max_digits=5, decimal_places=3)
+  educacao = serializers.DecimalField(max_digits=5, decimal_places=3)
