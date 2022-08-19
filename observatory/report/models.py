@@ -65,7 +65,7 @@ class InstaAggregate(models.Model):
     followers_count = models.IntegerField()
     posts_count = models.IntegerField()
     word_count = models.IntegerField()
-    hashtags = models.CharField(max_length=255)
+    hashtags = models.CharField(max_length=512)
     comments_count = models.IntegerField()
     likes = models.IntegerField()
     candidate = models.ForeignKey(Candidates, on_delete=models.CASCADE)
