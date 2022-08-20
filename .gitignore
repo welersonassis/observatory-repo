@@ -6,3 +6,5 @@ venv/
 manage.spec
 dist
 build
+app.yaml
+cloud_sql_proxy.exe

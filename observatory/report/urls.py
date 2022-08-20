@@ -3,13 +3,15 @@ from . import views
 
 
 urlpatterns = [
-    path('twitter_followers_count', views.twitter_followers_count, name='twitter_followers_count'),
+    path('followers_count', views.followers_count, name='followers_count'),
     path('candidate/<int:pk>', views.candidate, name='candidate'),
     path('candidate_hashtags', views.candidate_hashtags, name='candidate_hashtags'),
-    path('twitter_likes_count', views.twitter_likes_count, name='twitter_likes_count'),
+    path('likes_count', views.likes_count, name='likes_count'),
     path('retweets_count', views.retweets_count, name='retweets_count'),
     path('candidate_topics', views.candidate_topics, name='candidate_topics'),
     path('candidate_ranking', views.candidate_ranking, name='candidate_ranking'),
     path('space_topic', views.space_topic, name='space_topic'),
+    path('insta_comments_count', views.insta_comments_count, name='insta_comments_count'),
+    path('posts_count', views.posts_count, name='posts_count'),
     
 ]

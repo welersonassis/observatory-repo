@@ -1,3 +1,4 @@
+from datetime import date
 from pydoc_data.topics import topics
 from rest_framework import serializers
 from .models import Candidates, AggregateTweets, InstaAggregate, RawTweets, InstaRaw
@@ -76,6 +77,29 @@ class InstaRawSerializer(serializers.ModelSerializer):
     model = InstaRaw
     fields = '__all__'
 
+
+class FollowersSerializer(serializers.Serializer):
+  date = serializers.DateField()
+  followers_count = serializers.IntegerField()
+  followers_relative = serializers.DecimalField(max_digits=6, decimal_places=5)
+  candidate = serializers.IntegerField()
+
+
+class LikesSerializer(serializers.Serializer):
+  date = serializers.DateField()
+  likes_count = serializers.IntegerField(required=False)
+  likes_by_post = serializers.IntegerField()
+  candidate = serializers.IntegerField()
+
+class CommentsSerializer(serializers.Serializer):
+  date = serializers.DateField()
+  comments_by_post = serializers.IntegerField()
+  candidate = serializers.IntegerField()
+
+class PostsCountSerializer(serializers.Serializer):
+  date = serializers.DateField()
+  posts_count = serializers.IntegerField()
+  candidate = serializers.IntegerField()
 
 class HashtagSerializer(serializers.Serializer):
   name = serializers.CharField()

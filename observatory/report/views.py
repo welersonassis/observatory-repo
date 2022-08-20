@@ -1,4 +1,5 @@
 import re
+import pytz
 from django.shortcuts import render
 from .models import AggregateTweets, RawTweets, InstaAggregate, InstaRaw, Candidates
 from django.db import connection, transaction
@@ -8,6 +9,10 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from unidecode import unidecode
 from .serializers import (
+    FollowersSerializer,
+    LikesSerializer,
+    CommentsSerializer,
+    PostsCountSerializer,
     HashtagSerializer,
     CandidatesSerializer, 
     AggregateTweetsSerializer, 
@@ -21,6 +26,7 @@ from .serializers import (
 from django.db.models import Q
 from datetime import datetime, timedelta
 
+tzconfig = pytz.timezone("America/Fortaleza")
 
 @api_view(['GET'])
 def candidate(request,pk):
@@ -37,47 +43,195 @@ def candidate(request,pk):
 # Metrics
 
 @api_view(['GET'])
-def twitter_followers_count(request):
+def followers_count(request):
 
-    date_to = datetime.now()
-    date_from = date_to - timedelta(days=8)
-    date_to = date_to.strftime('%Y-%m-%d')
-    date_from = date_from.strftime('%Y-%m-%d')
+    media = request.query_params['media']
 
-    try:
-        agg_tweets = AggregateTweets.objects.filter(date__range=[date_from, date_to]).values('date', 'followers_count', 'candidate')
-    except candidate.DoesNotExist:
-        return HttpResponse(status=404)
+    if 'start' in request.query_params and 'end' in request.query_params:
+        date_from = request.query_params['start']
+        date_from = datetime.strptime(date_from,'%Y-%m-%d')
+        date_from = date_from - timedelta(days=1)
+        date_from = date_from.strftime('%Y-%m-%d')
+        date_to = request.query_params['end']
+    else:
+        date_to = datetime.now()
+        date_from = date_to - timedelta(days=8)
+        date_to = date_to.astimezone(tzconfig)
+        date_from = date_from.astimezone(tzconfig)
+        date_to = date_to.strftime('%Y-%m-%d')
+        date_from = date_from.strftime('%Y-%m-%d')
+
+    if media == 'twitter':
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                        WITH base AS (
+                            SELECT date, followers_count, candidate_id,
+                            LAG(followers_count,1) OVER (
+                                    PARTITION BY candidate_id
+                                    ORDER BY date
+                                ) prev_count
+                            FROM aggregate_tweets
+                            WHERE date BETWEEN '{date_from}' AND '{date_to}'
+                        )
+
+                        SELECT * FROM base WHERE prev_count IS NOT NULL
+            """)
+            results = cur.fetchall()
+
+    else:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                        WITH base AS (
+                            SELECT date, followers_count, candidate_id,
+                            LAG(followers_count,1) OVER (
+                                    PARTITION BY candidate_id
+                                    ORDER BY date
+                                ) prev_count
+                            FROM insta_aggregate
+                            WHERE date BETWEEN '{date_from}' AND '{date_to}'
+                        )
+
+                        SELECT * FROM base WHERE prev_count IS NOT NULL
+            """)
+
+            results = cur.fetchall()
+
+    data = [ {'date':row[0], 'followers_count':row[1], 'candidate':row[2], 'prev_count':row[3]} for row in results ]
+
+    for row in data:
+        row['followers_count'] = row['followers_count'] - row['prev_count']
+        row['followers_relative'] = row['followers_count'] / row['prev_count']
+        row.pop('prev_count', None)
+
+
 
     if request.method == 'GET':
-        serializer = AggregateTweetsSerializer(agg_tweets,many=True)
+        serializer = FollowersSerializer(data,many=True)
         return Response(serializer.data)
 
 
+
+
+
 @api_view(['GET'])
-def twitter_likes_count(request):
+def likes_count(request):
 
-    date_to = datetime.now()
-    date_from = date_to - timedelta(days=7)
-    date_to = date_to.strftime('%Y-%m-%d')
-    date_from = date_from.strftime('%Y-%m-%d')
+    media = request.query_params['media']
 
-    try:
-        agg_tweets = AggregateTweets.objects.filter(date__range=[date_from, date_to]).values('date', 'likes', 'candidate')
-    except candidate.DoesNotExist:
-        return HttpResponse(status=404)
+    if 'start' in request.query_params and 'end' in request.query_params:
+        date_from = request.query_params['start']
+        date_to = request.query_params['end']
+    else:
+        date_to = datetime.now()
+        date_from = date_to - timedelta(days=7)
+        date_to = date_to.astimezone(tzconfig)
+        date_from = date_from.astimezone(tzconfig)
+        date_to = date_to.strftime('%Y-%m-%d')
+        date_from = date_from.strftime('%Y-%m-%d')
+
+    if media == 'twitter':
+
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                            SELECT 
+                                date,
+                                likes,
+                                CASE WHEN tweets_count = 0 THEN 0 ELSE likes/tweets_count END AS likes_by_post,
+                                candidate_id
+                            FROM aggregate_tweets
+                            WHERE date BETWEEN '{date_from}' AND '{date_to}'
+            """)
+            results = cur.fetchall()
+
+            data = [ {'date':row[0], 'likes_count':row[1], 'likes_by_post':row[2], 'candidate':row[3]} for row in results ]
+
+    else:
+        date_to = datetime.strptime(date_to,'%Y-%m-%d')
+        date_to = date_to + timedelta(days=1)
+        date_to = date_to.strftime('%Y-%m-%d')
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                            SELECT 
+                                TO_CHAR(date, 'YYYY-MM-DD') AS date,
+                                SUM(likes)/COUNT(CASE WHEN likes != 0 THEN post_id END) AS likes_by_post,
+                                candidate_id
+                            FROM insta_raw
+                            WHERE date BETWEEN '{date_from}' AND '{date_to}'
+                            GROUP BY TO_CHAR(date, 'YYYY-MM-DD'), candidate_id
+            """)
+            results = cur.fetchall()
+
+            data = [ {'date':row[0], 'likes_by_post':row[1], 'candidate':row[2]} for row in results ]
+
 
     if request.method == 'GET':
-        serializer = AggregateTweetsSerializer(agg_tweets,many=True)
+        serializer = LikesSerializer(data,many=True)
+        return Response(serializer.data)
+
+@api_view(['GET'])
+def posts_count(request):
+
+    media = request.query_params['media']
+
+    if 'start' in request.query_params and 'end' in request.query_params:
+        date_from = request.query_params['start']
+        date_to = request.query_params['end']
+    else:
+        date_to = datetime.now()
+        date_from = date_to - timedelta(days=7)
+        date_to = date_to.astimezone(tzconfig)
+        date_from = date_from.astimezone(tzconfig)
+        date_to = date_to.strftime('%Y-%m-%d')
+        date_from = date_from.strftime('%Y-%m-%d')
+
+    if media == 'twitter':
+
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                            SELECT 
+                                date,
+                                tweets_count,
+                                candidate_id
+                            FROM aggregate_tweets
+                            WHERE date BETWEEN '{date_from}' AND '{date_to}'
+            """)
+            results = cur.fetchall()
+
+    else:
+        date_to = datetime.strptime(date_to,'%Y-%m-%d')
+        date_to = date_to + timedelta(days=1)
+        date_to = date_to.strftime('%Y-%m-%d')
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                            SELECT 
+                                date,
+                                posts_count,
+                                candidate_id
+                            FROM insta_aggregate
+                            WHERE date BETWEEN '{date_from}' AND '{date_to}'
+            """)
+            results = cur.fetchall()
+
+    data = [ {'date':row[0], 'posts_count':row[1], 'candidate':row[2]} for row in results ]
+
+
+    if request.method == 'GET':
+        serializer = PostsCountSerializer(data,many=True)
         return Response(serializer.data)
 
 @api_view(['GET'])
 def retweets_count(request):
 
-    date_to = datetime.now()
-    date_from = date_to - timedelta(days=7)
-    date_to = date_to.strftime('%Y-%m-%d')
-    date_from = date_from.strftime('%Y-%m-%d')
+    if 'start' in request.query_params and 'end' in request.query_params:
+        date_from = request.query_params['start']
+        date_to = request.query_params['end']
+    else:
+        date_to = datetime.now()
+        date_from = date_to - timedelta(days=7)
+        date_to = date_to.astimezone(tzconfig)
+        date_from = date_from.astimezone(tzconfig)
+        date_to = date_to.strftime('%Y-%m-%d')
+        date_from = date_from.strftime('%Y-%m-%d')
 
     try:
         agg_tweets = AggregateTweets.objects.filter(date__range=[date_from, date_to]).values('date', 'retweets', 'candidate')
@@ -89,36 +243,94 @@ def retweets_count(request):
         return Response(serializer.data)
 
 
+@api_view(['GET'])
+def insta_comments_count(request):
+
+    if 'start' in request.query_params and 'end' in request.query_params:
+        date_from = request.query_params['start']
+        date_to = request.query_params['end']
+    else:
+        date_to = datetime.now()
+        date_from = date_to - timedelta(days=7)
+        date_to = date_to.astimezone(tzconfig)
+        date_from = date_from.astimezone(tzconfig)
+        date_to = date_to.strftime('%Y-%m-%d')
+        date_from = date_from.strftime('%Y-%m-%d')
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute(f"""
+                        SELECT 
+                            TO_CHAR(date, 'YYYY-MM-DD') AS date,
+                            SUM(comments_count)/COUNT(CASE WHEN comments_count != 0 THEN post_id END) AS comments_by_post,
+                            candidate_id
+                        FROM insta_raw
+                        WHERE date BETWEEN '{date_from}' AND '{date_to}'
+                        GROUP BY TO_CHAR(date, 'YYYY-MM-DD'), candidate_id
+        """)
+        results = cur.fetchall()
+
+        data = [ {'date':row[0], 'comments_by_post':row[1], 'candidate':row[2]} for row in results ]
+
+    if request.method == 'GET':
+        serializer = CommentsSerializer(data,many=True)
+        return Response(serializer.data)
+
+
 
 @api_view(['GET'])
 def candidate_hashtags(request):
 
-    date_to = datetime.now()
-    date_from = date_to - timedelta(days=7)
-    date_to = date_to.strftime('%Y-%m-%d')
-    date_from = date_from.strftime('%Y-%m-%d')
+    media = request.query_params['media']
 
-    with transaction.atomic(), connection.cursor() as cur:
-        cur.execute(f"""
-                SELECT
-                    c.name,
-                    array_to_string(array_agg(r.hashtags), ',')
-                FROM raw_tweets r
-                LEFT JOIN candidates c ON c.candidate_id = r.candidate_id 
-                WHERE r.date BETWEEN '{date_from}' AND '{date_to}'
-                GROUP BY c.name
-        """)
+    if 'start' in request.query_params and 'end' in request.query_params:
+        date_from = request.query_params['start']
+        date_to = request.query_params['end']
+    else:
+        date_to = datetime.now()
+        date_from = date_to - timedelta(days=7)
+        date_to = date_to.astimezone(tzconfig)
+        date_from = date_from.astimezone(tzconfig)
+        date_to = date_to.strftime('%Y-%m-%d')
+        date_from = date_from.strftime('%Y-%m-%d')
 
-        results = cur.fetchall()
+    if media == 'twitter':
 
-        data = [ {'name':row[0], 'hashtags':row[1]} for row in results ]
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                    SELECT
+                        c.name,
+                        array_to_string(array_agg(r.hashtags), ',')
+                    FROM raw_tweets r
+                    LEFT JOIN candidates c ON c.candidate_id = r.candidate_id 
+                    WHERE r.date BETWEEN '{date_from}' AND '{date_to}'
+                    GROUP BY c.name
+            """)
 
-        for row in data:
-            row['hashtags'] = [ hash for hash in row['hashtags'].split(',') if hash]
-            if row['hashtags']:
-                row['hashtags'] = hashtags_count(row['hashtags'])
-            else:
-                row['hashtags'] = {}
+            results = cur.fetchall()
+
+    else:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                    SELECT
+                        c.name,
+                        array_to_string(array_agg(r.hashtags), ',')
+                    FROM insta_raw r
+                    LEFT JOIN candidates c ON c.candidate_id = r.candidate_id 
+                    WHERE r.date BETWEEN '{date_from}' AND '{date_to}'
+                    GROUP BY c.name
+            """)
+
+            results = cur.fetchall()
+
+
+    data = [ {'name':row[0], 'hashtags':row[1]} for row in results ]
+
+    for row in data:
+        row['hashtags'] = [ hash for hash in row['hashtags'].split(',') if hash]
+        if row['hashtags']:
+            row['hashtags'] = hashtags_count(row['hashtags'])
+        else:
+            row['hashtags'] = {}
 
 
     if request.method == 'GET':
@@ -129,34 +341,58 @@ def candidate_hashtags(request):
 @api_view(['GET'])
 def candidate_topics(request):
 
-    date_to = datetime.now()
-    date_from = date_to - timedelta(days=7)
-    date_to = date_to.strftime('%Y-%m-%d')
-    date_from = date_from.strftime('%Y-%m-%d')
+    media = request.query_params['media']
 
-    with transaction.atomic(), connection.cursor() as cur:
-        cur.execute(f"""
-                SELECT
-                    c.name,
-                    array_to_string(array_agg(r.tweet_text), '')
-                FROM raw_tweets r
-                LEFT JOIN candidates c ON c.candidate_id = r.candidate_id 
-                WHERE r.date BETWEEN '{date_from}' AND '{date_to}'
-                GROUP BY c.name
-        """)
+    if 'start' in request.query_params and 'end' in request.query_params:
+        date_from = request.query_params['start']
+        date_to = request.query_params['end']
+    else:
+        date_to = datetime.now()
+        date_from = date_to - timedelta(days=7)
+        date_to = date_to.astimezone(tzconfig)
+        date_from = date_from.astimezone(tzconfig)
+        date_to = date_to.strftime('%Y-%m-%d')
+        date_from = date_from.strftime('%Y-%m-%d')
 
-        results = cur.fetchall()
+    if media == 'twitter':
 
-        data = [ {'name':row[0], 'text':row[1]} for row in results ]
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                    SELECT
+                        c.name,
+                        array_to_string(array_agg(r.tweet_text), '')
+                    FROM raw_tweets r
+                    LEFT JOIN candidates c ON c.candidate_id = r.candidate_id 
+                    WHERE r.date BETWEEN '{date_from}' AND '{date_to}'
+                    GROUP BY c.name
+            """)
 
-        for row in data:
-            if row['text']:
-                row['text'] = word_cleaning(row['text']).replace('\n', '')
-                row['topics'] = dictionary_score(row['text'])
-                row.pop('text', None)
-            else:
-                row['topics'] = {}
-                row.pop('text', None)
+            results = cur.fetchall()
+
+    else:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                    SELECT
+                        c.name,
+                        array_to_string(array_agg(r.post_text), '')
+                    FROM insta_raw r
+                    LEFT JOIN candidates c ON c.candidate_id = r.candidate_id 
+                    WHERE r.date BETWEEN '{date_from}' AND '{date_to}'
+                    GROUP BY c.name
+            """)
+
+            results = cur.fetchall()
+
+    data = [ {'name':row[0], 'text':row[1]} for row in results ]
+
+    for row in data:
+        if row['text']:
+            row['text'] = word_cleaning(row['text']).replace('\n', '')
+            row['topics'] = dictionary_score(row['text'])
+            row.pop('text', None)
+        else:
+            row['topics'] = {}
+            row.pop('text', None)
 
 
     if request.method == 'GET':
@@ -167,55 +403,79 @@ def candidate_topics(request):
 @api_view(['GET'])
 def candidate_ranking(request):
 
-    date_to = datetime.now()
-    date_from = date_to - timedelta(days=7)
-    date_to = date_to.strftime('%Y-%m-%d')
-    date_from = date_from.strftime('%Y-%m-%d')
+    media = request.query_params['media']
 
-    with transaction.atomic(), connection.cursor() as cur:
-        cur.execute(f"""
-                SELECT
-                    c.name,
-                    array_to_string(array_agg(r.tweet_text), '')
-                FROM raw_tweets r
-                LEFT JOIN candidates c ON c.candidate_id = r.candidate_id 
-                WHERE r.date BETWEEN '{date_from}' AND '{date_to}'
-                GROUP BY c.name
-        """)
+    if 'start' in request.query_params and 'end' in request.query_params:
+        date_from = request.query_params['start']
+        date_to = request.query_params['end']
+    else:
+        date_to = datetime.now()
+        date_from = date_to - timedelta(days=7)
+        date_to = date_to.astimezone(tzconfig)
+        date_from = date_from.astimezone(tzconfig)
+        date_to = date_to.strftime('%Y-%m-%d')
+        date_from = date_from.strftime('%Y-%m-%d')
 
-        results = cur.fetchall()
+    if media == 'twitter':
 
-        data = [ {'name':row[0], 'text':row[1]} for row in results ]
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                    SELECT
+                        c.name,
+                        array_to_string(array_agg(r.tweet_text), '')
+                    FROM raw_tweets r
+                    LEFT JOIN candidates c ON c.candidate_id = r.candidate_id 
+                    WHERE r.date BETWEEN '{date_from}' AND '{date_to}'
+                    GROUP BY c.name
+            """)
 
-        topic_list = []
+            results = cur.fetchall()
 
-        for row in data:
-            if row['text']:
-                row['text'] = word_cleaning(row['text']).replace('\n', '')
-                tmp = ranking_topic(row['name'],row['text'])
-                topic_list.append(tmp)
-            else:
-                tmp = {'candidate':row['name'], 'health':0, 'security':0, 'infra':0, 'education':0}
+    else:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                    SELECT
+                        c.name,
+                        array_to_string(array_agg(r.post_text), '')
+                    FROM insta_raw r
+                    LEFT JOIN candidates c ON c.candidate_id = r.candidate_id 
+                    WHERE r.date BETWEEN '{date_from}' AND '{date_to}'
+                    GROUP BY c.name
+            """)
 
-        data = {'saude':'name', 'seguranca':'name', 'saneamento':'name', 'educacao':'name'}
+            results = cur.fetchall()
 
-        tmp_saude = {}
-        tmp_seg = {}
-        tmp_infra = {}
-        tmp_edu = {}
+    data = [ {'name':row[0], 'text':row[1]} for row in results ]
 
-        for row in topic_list:
-            tmp_saude[row['candidate']] = row['health']
-            tmp_seg[row['candidate']] = row['security'] 
-            tmp_infra[row['candidate']] = row['infra'] 
-            tmp_edu[row['candidate']] = row['education']  
+    topic_list = []
 
-        data['saude'] = tmp_saude
-        data['seguranca'] = tmp_seg          
-        data['saneamento'] = tmp_infra
-        data['educacao'] = tmp_edu
+    for row in data:
+        if row['text']:
+            row['text'] = word_cleaning(row['text']).replace('\n', '')
+            tmp = ranking_topic(row['name'],row['text'])
+            topic_list.append(tmp)
+        else:
+            tmp = {'candidate':row['name'], 'health':0, 'security':0, 'infra':0, 'education':0}
 
-        data = [data]
+    data = {'saude':'name', 'seguranca':'name', 'saneamento':'name', 'educacao':'name'}
+
+    tmp_saude = {}
+    tmp_seg = {}
+    tmp_infra = {}
+    tmp_edu = {}
+
+    for row in topic_list:
+        tmp_saude[row['candidate']] = row['health']
+        tmp_seg[row['candidate']] = row['security'] 
+        tmp_infra[row['candidate']] = row['infra'] 
+        tmp_edu[row['candidate']] = row['education']  
+
+    data['saude'] = tmp_saude
+    data['seguranca'] = tmp_seg          
+    data['saneamento'] = tmp_infra
+    data['educacao'] = tmp_edu
+
+    data = [data]
 
     if request.method == 'GET':
         serializer = RankingSerializer(data,many=True)
@@ -225,49 +485,73 @@ def candidate_ranking(request):
 @api_view(['GET'])
 def space_topic(request):
 
-    date_to = datetime.now()
-    date_from = date_to - timedelta(days=7)
-    date_to = date_to.strftime('%Y-%m-%d')
-    date_from = date_from.strftime('%Y-%m-%d')
+    media = request.query_params['media']
 
-    with transaction.atomic(), connection.cursor() as cur:
-        cur.execute(f"""
-                SELECT
-                    c.name,
-                    array_to_string(array_agg(r.tweet_text), '')
-                FROM raw_tweets r
-                LEFT JOIN candidates c ON c.candidate_id = r.candidate_id 
-                WHERE r.date BETWEEN '{date_from}' AND '{date_to}'
-                GROUP BY c.name
-        """)
+    if 'start' in request.query_params and 'end' in request.query_params:
+        date_from = request.query_params['start']
+        date_to = request.query_params['end']
+    else:
+        date_to = datetime.now()
+        date_from = date_to - timedelta(days=7)
+        date_to = date_to.astimezone(tzconfig)
+        date_from = date_from.astimezone(tzconfig)
+        date_to = date_to.strftime('%Y-%m-%d')
+        date_from = date_from.strftime('%Y-%m-%d')
 
-        results = cur.fetchall()
+    if media == 'twitter':
 
-        data = [ {'name':row[0], 'text':row[1]} for row in results ]
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                    SELECT
+                        c.name,
+                        array_to_string(array_agg(r.tweet_text), '')
+                    FROM raw_tweets r
+                    LEFT JOIN candidates c ON c.candidate_id = r.candidate_id 
+                    WHERE r.date BETWEEN '{date_from}' AND '{date_to}'
+                    GROUP BY c.name
+            """)
 
-        topic_list = []
+            results = cur.fetchall()
 
-        for row in data:
-            if row['text']:
-                row['text'] = word_cleaning(row['text']).replace('\n', '')
-                tmp = ranking_topic(row['name'],row['text'])
-                tmp['word_count'] = len(row['text'].split())
-                topic_list.append(tmp)
-            else:
-                tmp = {'candidate':row['name'], 'health':0, 'security':0, 'infra':0, 'education':0, 'word_count':1}
+    else:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute(f"""
+                    SELECT
+                        c.name,
+                        array_to_string(array_agg(r.post_text), '')
+                    FROM insta_raw r
+                    LEFT JOIN candidates c ON c.candidate_id = r.candidate_id 
+                    WHERE r.date BETWEEN '{date_from}' AND '{date_to}'
+                    GROUP BY c.name
+            """)
 
-        for row in topic_list:
-            row['saude'] = round((row['health'] / row['word_count'])*100, 3)
-            row['seguranca'] = round((row['security'] / row['word_count'])*100, 3)
-            row['saneamento'] = round((row['infra'] / row['word_count'])*100, 3)
-            row['educacao'] = round((row['education'] / row['word_count'])*100, 3)
-            row.pop('health', None)
-            row.pop('word_count', None)
-            row.pop('security', None)
-            row.pop('infra', None)
-            row.pop('education', None)         
+            results = cur.fetchall()
 
-        data = topic_list
+    data = [ {'name':row[0], 'text':row[1]} for row in results ]
+
+    topic_list = []
+
+    for row in data:
+        if row['text']:
+            row['text'] = word_cleaning(row['text']).replace('\n', '')
+            tmp = ranking_topic(row['name'],row['text'])
+            tmp['word_count'] = len(row['text'].split())
+            topic_list.append(tmp)
+        else:
+            tmp = {'candidate':row['name'], 'health':0, 'security':0, 'infra':0, 'education':0, 'word_count':1}
+
+    for row in topic_list:
+        row['saude'] = round((row['health'] / row['word_count'])*100, 3)
+        row['seguranca'] = round((row['security'] / row['word_count'])*100, 3)
+        row['saneamento'] = round((row['infra'] / row['word_count'])*100, 3)
+        row['educacao'] = round((row['education'] / row['word_count'])*100, 3)
+        row.pop('health', None)
+        row.pop('word_count', None)
+        row.pop('security', None)
+        row.pop('infra', None)
+        row.pop('education', None)         
+
+    data = topic_list
 
     if request.method == 'GET':
         serializer = SpaceSerializer(data,many=True)
