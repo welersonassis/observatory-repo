@@ -32,6 +32,10 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
+CORS_ORIGIN_WHITELIST = [
+    'http://localhost:8083',
+    'http://127.0.0.1:8083'
+]
 
 # Application definition
 
