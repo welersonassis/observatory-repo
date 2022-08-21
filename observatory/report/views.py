@@ -75,6 +75,7 @@ def followers_count(request):
                         )
 
                         SELECT * FROM base WHERE prev_count IS NOT NULL
+                        ORDER BY date ASC
             """)
             results = cur.fetchall()
 
@@ -92,6 +93,7 @@ def followers_count(request):
                         )
 
                         SELECT * FROM base WHERE prev_count IS NOT NULL
+                        ORDER BY date ASC
             """)
 
             results = cur.fetchall()
@@ -140,6 +142,7 @@ def likes_count(request):
                                 candidate_id
                             FROM aggregate_tweets
                             WHERE date BETWEEN '{date_from}' AND '{date_to}'
+                            ORDER BY date ASC
             """)
             results = cur.fetchall()
 
@@ -158,6 +161,7 @@ def likes_count(request):
                             FROM insta_raw
                             WHERE date BETWEEN '{date_from}' AND '{date_to}'
                             GROUP BY TO_CHAR(date, 'YYYY-MM-DD'), candidate_id
+                            ORDER BY date ASC
             """)
             results = cur.fetchall()
 
@@ -194,6 +198,7 @@ def posts_count(request):
                                 candidate_id
                             FROM aggregate_tweets
                             WHERE date BETWEEN '{date_from}' AND '{date_to}'
+                            ORDER BY date ASC
             """)
             results = cur.fetchall()
 
@@ -209,6 +214,7 @@ def posts_count(request):
                                 candidate_id
                             FROM insta_aggregate
                             WHERE date BETWEEN '{date_from}' AND '{date_to}'
+                            ORDER BY date ASC
             """)
             results = cur.fetchall()
 
@@ -266,6 +272,7 @@ def insta_comments_count(request):
                         FROM insta_raw
                         WHERE date BETWEEN '{date_from}' AND '{date_to}'
                         GROUP BY TO_CHAR(date, 'YYYY-MM-DD'), candidate_id
+                        ORDER BY date
         """)
         results = cur.fetchall()
 
