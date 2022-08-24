@@ -240,7 +240,7 @@ def retweets_count(request):
         date_from = date_from.strftime('%Y-%m-%d')
 
     try:
-        agg_tweets = AggregateTweets.objects.filter(date__range=[date_from, date_to]).values('date', 'retweets', 'candidate')
+        agg_tweets = AggregateTweets.objects.filter(date__range=[date_from, date_to]).order_by('date').values('date', 'retweets', 'candidate')
     except candidate.DoesNotExist:
         return HttpResponse(status=404)
 
